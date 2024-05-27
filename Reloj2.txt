@@ -1,0 +1,294 @@
+library IEEE;
+use IEEE.STD_LOGIC_1164.ALL;
+use IEEE.NUMERIC_STD.ALL;
+
+entity Reloj is
+    Port (
+		  -- Entradas
+        clk : in std_logic; -- Señal de reloj
+        btn5 : in std_logic; -- Botones para controlar funcionalidades
+        btn4 : in std_logic;
+        btn3 : in std_logic;
+        btn2 : in std_logic;
+        btn1 : in std_logic;
+		  reset : in std_logic;
+        -- Salidas
+        d1 : out std_logic_vector(6 downto 0); -- Unidad Segundos
+        d2 : out std_logic_vector(6 downto 0); -- Decena Segundos
+        d3 : out std_logic_vector(6 downto 0); -- Unidad Minutos
+        d4 : out std_logic_vector(6 downto 0); -- Decena Minutos
+        d5 : out std_logic_vector(6 downto 0); -- Unidad Hora
+        d6 : out std_logic_vector(6 downto 0); -- Decena Hora
+        leds : out std_logic_vector(3 downto 0); -- Leds que indican en qué estado estamos
+        dp : out std_logic_vector(5 downto 0)  -- Leds que indican en que display estamos (E2)
+    );
+end Reloj;
+
+architecture arq_Reloj of Reloj is
+	 -- Contadores de señal de reloj
+    signal COUNT_MAX : integer := 2; -- Límite de contador CLK
+    signal clk_counter : integer range 0 to COUNT_MAX := 0;
+
+	 -- Banderas para modificar el comportamiento de los botones dependiendo del estado
+    signal runClock, runChronometer, resetValues : std_logic := '0';
+    signal changeValue : std_logic := '0';
+    signal actual_display : integer range 1 to 6 := 1;
+    signal showAdios : std_logic := '0';
+
+	 -- Contadores para el reloj y cronometro 
+    signal unitsSeg_R : integer range 0 to 9 := 0;
+    signal tensSeg_R : integer range 0 to 5 := 0;
+    signal unitsMin_R : integer range 0 to 9 := 0;
+    signal tensMin_R : integer range 0 to 5 := 0;
+    signal unitsHour_R : integer range 0 to 9 := 0;
+    signal tensHour_R : integer range 0 to 2 := 0;
+
+	 -- Definicion de estados
+    type state_type is (S0, S1, S2, S3, S4);
+    signal current_state, next_state : state_type := S0;
+
+	 -- Funcion para traducir un numero binario a su respectivo entero en el display
+    function bin_to_7seg(input : std_logic_vector(3 downto 0)) return std_logic_vector is
+		begin
+			 case input is
+				  when "0000" => return "0111111"; -- 0
+				  when "0001" => return "0000110"; -- 1
+				  when "0010" => return "1011011"; -- 2
+				  when "0011" => return "1001111"; -- 3
+				  when "0100" => return "1100110"; -- 4
+				  when "0101" => return "1101101"; -- 5
+				  when "0110" => return "1111101"; -- 6
+				  when "0111" => return "0000111"; -- 7
+				  when "1000" => return "1111111"; -- 8
+				  when "1001" => return "1101111"; -- 9
+				  when others => return "0000000"; -- Default: apagado
+			 end case;
+		end function;
+
+
+begin
+	
+	process(clk, reset)
+    begin
+        if reset = '1' then
+            current_state <= S0;
+        elsif rising_edge(clk) then
+            current_state <= next_state;
+        end if;
+    end process;
+	
+	 -- Proceso que se encarga de validar las banderas de cada estado por ende
+	 -- dar un comportamiento u otro dependiendo de que bandera este activa.
+    process(clk, runClock, runChronometer, resetValues, changeValue, showAdios)
+    begin
+		  -- Con cada flanco de subida escojemos una verificacion 
+        if rising_edge(clk) then
+		  
+				-- Si el boton de reset (btn1) esta activo y el reloj o cronometro corriendo se 
+				-- resetean los valores de los contadores. También se toma en consideración una 
+				-- bandera de reseteo
+            if resetValues = '1' or (btn1 = '1' and (runClock = '1' or changeValue = '1')) then
+                unitsSeg_R <= 0;
+                tensSeg_R <= 0;
+                unitsMin_R <= 0;
+                tensMin_R <= 0;
+                unitsHour_R <= 0;
+                tensHour_R <= 0;
+                actual_display <= 1;
+				-- Si estamos en el E3 la bandera de changeValue estará activa
+				-- cuando esto se cumpla podremos movernos por los displays y 
+				-- aumentar o disminuir su valor
+            elsif changeValue = '1' then
+                if btn3 = '1' then
+                    if actual_display = 6 then
+                        actual_display <= 1;
+                    else
+                        actual_display <= actual_display + 1;
+                    end if;
+                elsif btn4 = '1' then
+                    case actual_display is
+                        when 1 => if unitsSeg_R > 0 then unitsSeg_R <= unitsSeg_R - 1; end if;
+                        when 2 => if tensSeg_R > 0 then tensSeg_R <= tensSeg_R - 1; end if;
+                        when 3 => if unitsMin_R > 0 then unitsMin_R <= unitsMin_R - 1; end if;
+                        when 4 => if tensMin_R > 0 then tensMin_R <= tensMin_R - 1; end if;
+                        when 5 => if unitsHour_R > 0 then unitsHour_R <= unitsHour_R - 1; end if;
+                        when 6 => if tensHour_R > 0 then tensHour_R <= tensHour_R - 1; end if;
+                    end case;
+                elsif btn2 = '1' then
+                    case actual_display is
+                        when 1 => if unitsSeg_R < 9 then unitsSeg_R <= unitsSeg_R + 1; end if;
+                        when 2 => if tensSeg_R < 5 then tensSeg_R <= tensSeg_R + 1; end if;
+                        when 3 => if unitsMin_R < 9 then unitsMin_R <= unitsMin_R + 1; end if;
+                        when 4 => if tensMin_R < 5 then tensMin_R <= tensMin_R + 1; end if;
+                        when 5 => if unitsHour_R < 9 then unitsHour_R <= unitsHour_R + 1; end if;
+                        when 6 => if tensHour_R < 2 then tensHour_R <= tensHour_R + 1; end if;
+                    end case;
+                end if;
+				-- Si la bandera de showAdios esta activa estamos en el E4, se pretendia mostrar el mensaje en los displays,
+				-- sin embargo, debido a limitaciones de recursos simplemente modifica los valores de los contadores.
+				elsif showAdios = '1' then
+					 unitsSeg_R <= 8;
+                tensSeg_R <= 1;
+                unitsMin_R <= 8;
+                tensMin_R <= 1;
+                unitsHour_R <= 8;
+                tensHour_R <= 1;
+                actual_display <= 1;
+				-- Si no hay banderas activas, aumentamos los valores de los contadores
+				-- al completarse un ciclo de reloj
+            elsif clk_counter = COUNT_MAX then
+                clk_counter <= 0;
+
+                if runClock = '1' or runChronometer = '1' then
+                    if unitsSeg_R = 9 then
+                        unitsSeg_R <= 0;
+                        if tensSeg_R = 5 then
+                            tensSeg_R <= 0;
+                            if unitsMin_R = 9 then
+                                unitsMin_R <= 0;
+                                if tensMin_R = 5 then
+                                    tensMin_R <= 0;
+                                    if unitsHour_R = 9 then
+                                        unitsHour_R <= 0;
+                                        tensHour_R <= tensHour_R + 1;
+                                    elsif unitsHour_R = 3 and tensHour_R = 2 then
+                                        unitsSeg_R <= 0;
+                                        tensSeg_R <= 0;
+                                        unitsMin_R <= 0;
+                                        tensMin_R <= 0;
+                                        unitsHour_R <= 0;
+                                        tensHour_R <= 0;
+                                    else
+                                        unitsHour_R <= unitsHour_R + 1;
+                                    end if;
+                                else
+                                    tensMin_R <= tensMin_R + 1;
+                                end if;
+                            else
+                                unitsMin_R <= unitsMin_R + 1;
+                            end if;
+                        else
+                            tensSeg_R <= tensSeg_R + 1;
+                        end if;
+                    else
+                        unitsSeg_R <= unitsSeg_R + 1;
+                    end if;
+                end if;
+            else
+                clk_counter <= clk_counter + 1;
+            end if;
+
+            
+        end if;
+    end process;
+
+	 -- Transiciones entre estados:
+	 -- Dependiendo del estado en el que nos encontremos los botones
+	 -- tendran distintas funcionalidades. 
+    process(current_state, btn5, btn4, btn3, btn2)
+    begin
+        case current_state is
+				-- Apagado
+            when S0 =>
+                leds <= "0000";
+                showAdios <= '0';
+					 runClock <= '0';
+					 resetValues <= '0';
+					 -- Encender reloj
+                if btn5 = '1' then
+                    next_state <= S1;
+                else
+                    next_state <= S0;
+                end if;
+				-- Modo reloj
+            when S1 =>
+                leds <= "1000";
+                runClock <= '1';
+					 runChronometer <= '0';
+                changeValue <= '0';
+					 -- Apagar
+                if btn2 = '1' then
+                    next_state <= S4;
+					 -- Cronometro
+                elsif btn3 = '1' then
+						  resetValues <= '1';
+                    next_state <= S3;
+					 -- Modificar hora
+                elsif btn4 = '1' then
+                    next_state <= S2;
+                else
+                    next_state <= S1;
+                end if;
+				-- Modo modificar hora
+            when S2 =>
+                leds <= "0100";
+                changeValue <= '1';
+                runClock <= '0';
+					 -- Guardar cambios y regresar a reloj
+                if btn5 = '1' then
+                    next_state <= S1;
+                else
+                    next_state <= S2;
+                end if;
+				-- Cronometro
+            when S3 =>
+                leds <= "0010";
+                runClock <= '0';
+					 resetValues <= '0';
+					 -- Apagar 
+                if btn2 = '1' then
+                    next_state <= S4;
+					 -- Regresar a reloj
+                elsif btn5 = '1' then
+                    next_state <= S1;
+					 -- Iniciar cronometro
+					 elsif btn4 = '1' then
+						  runChronometer <= '1';
+                    next_state <= S3;
+					 -- Parar cronometro
+					 elsif btn3 = '1' then
+						  runChronometer <= '0';
+                    next_state <= S3;
+                else
+                    next_state <= S3;
+                end if;
+
+            when S4 =>
+                leds <= "0001";
+                showAdios <= '1';
+					 resetValues <= '1';
+					 runClock <= '0';
+					 runChronometer <= '0';
+					 -- Al soltar el boton de apagado regresa al estado inicial
+                if btn4 = '1' then
+                    next_state <= S0;
+                else
+                    next_state <= S4;
+                end if;
+        end case;
+    end process;
+
+	 -- Asignamos los valores respectivos de los contadores a los displays
+    d1 <= bin_to_7seg(std_logic_vector(to_unsigned(unitsSeg_R, 4)));
+    d2 <= bin_to_7seg(std_logic_vector(to_unsigned(tensSeg_R, 4)));
+    d3 <= bin_to_7seg(std_logic_vector(to_unsigned(unitsMin_R, 4)));
+    d4 <= bin_to_7seg(std_logic_vector(to_unsigned(tensMin_R, 4)));
+    d5 <= bin_to_7seg(std_logic_vector(to_unsigned(unitsHour_R, 4)));
+    d6 <= bin_to_7seg(std_logic_vector(to_unsigned(tensHour_R, 4)));
+	 
+	 
+	 -- Proceso para manejar la salida dp y mostrar en que display estamos
+    process(actual_display)
+    begin
+        case actual_display is
+            when 1 => dp <= "100000";
+            when 2 => dp <= "010000";
+            when 3 => dp <= "001000";
+            when 4 => dp <= "000100";
+            when 5 => dp <= "000010";
+            when 6 => dp <= "000001";
+            when others => dp <= "000000"; -- Valor por defecto si actual_display está fuera del rango
+        end case;
+    end process;
+	 
+end arq_Reloj;

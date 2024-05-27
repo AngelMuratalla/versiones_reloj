@@ -1,0 +1,257 @@
+library IEEE;
+use IEEE.STD_LOGIC_1164.ALL;
+use IEEE.NUMERIC_STD.ALL;
+
+entity Reloj3 is
+    Port (
+		  -- Entradas
+        clk : in std_logic; -- Señal de reloj
+        reset : in std_logic;  -- Reset del sistema
+		  btn5 : in std_logic; -- Botones para controlar funcionalidades
+        btn4 : in std_logic;
+        btn3 : in std_logic;
+        btn2 : in std_logic;
+        -- Salidas
+        --abcd : out std_logic_vector(3 downto 0); Salida de prueba
+		  
+		  d1 : out std_logic_vector(6 downto 0); -- Unidad Segundos
+        d2 : out std_logic_vector(6 downto 0); -- Decena Segundos
+		  d3 : out std_logic_vector(6 downto 0); -- Unidad Minutos
+		  d4 : out std_logic_vector(6 downto 0); -- Decena Minutos
+        leds : out std_logic_vector(3 downto 0); -- Leds que indican en qué estado estamos
+        dp : out std_logic_vector(5 downto 0)  -- Leds que indican en que display estamos (E2)
+		  
+    );
+end Reloj3;
+
+architecture Behavioral of Reloj3 is
+	 
+	 -- Control de relojes
+	 constant COUNT_MAX : integer := 50000000; 							  -- Límite de contador CLK
+	 signal clk_counter : integer range 0 to COUNT_MAX := 0;         -- Contador de flancos de subida
+--    signal clock_enable : std_logic := '0';								  -- Habilitador de aumentos 
+	 
+	 signal leds_temp : std_logic_vector (3 downto 0) := "0000"; 
+	 
+	 -- Banderas para modificar el comportamiento de los botones dependiendo del estado
+    signal runClock : std_logic := '0';
+	 
+--	 signal actual_display : integer range 1 to 6 := 1;
+	 
+	 -- Definicion de estados
+    type state_type is (S0, S1, S2, S3, S4);
+    signal current_state, next_state : state_type;
+
+	 -- Funcion para traducir un numero entero a su respectivo entero en el display
+    function int_to_7seg(input : integer ) return std_logic_vector is
+		begin
+			 case input is
+				  when 0 => return "0111111"; -- 0
+				  when 1 => return "0000110"; -- 1
+				  when 2 => return "1011011"; -- 2
+				  when 3 => return "1001111"; -- 3
+				  when 4 => return "1100110"; -- 4
+				  when 5 => return "1101101"; -- 5
+				  when 6 => return "1111101"; -- 6
+				  when 7 => return "0000111"; -- 7
+				  when 8 => return "1111111"; -- 8
+				  when 9 => return "1101111"; -- 9
+				  when others => return "0000000"; -- Default: apagado
+			 end case;
+		end function;
+		
+		-- Contadores para el reloj y cronometro 
+		signal sec : integer range 0 to 59 := 0;
+		signal min: integer range 0 to 59 := 0;
+		signal hour : integer range 0 to 23 := 0;
+
+	   function clk_count (
+			sec : in integer range 0 to 59;
+			min : in integer range 0 to 59;
+			hour : in integer range 0 to 23
+		) return std_logic_vector is 
+			variable result : std_logic_vector(3 downto 0);
+		begin
+			if sec = 59 then
+				  if min = 59 then
+						if hour = 23 then
+							result := "0001";
+						else
+							result := "0010";
+						end if;
+				  else
+						result := "0100";
+				  end if;
+			 else
+				  result := "1000";
+			 end if;
+			 
+			 return result; 
+		end function clk_count;
+		
+ 
+	 
+begin
+
+
+	 -- Procesos para cambiar de estados
+    changeState : process(clk, reset)
+    begin
+        if reset = '1' then
+            current_state <= S0;
+        elsif rising_edge(clk) then
+            current_state <= next_state;
+        end if;
+    end process changeState;
+	
+	-- Proceso para contar los flancos de subida
+   risingClk : process(clk, reset, runClock)
+		variable result : std_logic_vector(3 downto 0);
+    begin
+        if reset = '1' then
+            clk_counter <= 0;
+--            clock_enable <= '0';
+				sec <= 0;
+				min <= 0;
+				hour <= 0;
+--				actual_display <= 1;
+        elsif rising_edge(clk) then
+            if clk_counter = COUNT_MAX then
+                clk_counter <= 0;
+--                clock_enable <= '1';
+					 if runClock = '1' then
+						result := clk_count(sec, min, hour);
+						if result = "1000" then
+							sec <= sec + 1;
+						elsif result = "0100" then
+							min <= min + 1;
+							sec <= 0;
+						elsif result = "0010" then
+							hour <= 0;
+							sec <= 0;
+							min <= 0;
+						elsif result = "0001" then
+							sec <= 0;
+							min <= 0;
+							hour <= 0;
+						end if;
+					end if;
+            else
+                clk_counter <= clk_counter + 1;
+--                clock_enable <= '0';
+            end if;
+        end if;
+    end process risingClk;
+
+	
+	 -- Transiciones entre estados:
+	 -- Dependiendo del estado en el que nos encontremos los botones
+	 -- tendran distintas funcionalidades. 
+    transitions : process(current_state, btn5, btn4, btn3, btn2)
+    begin
+			
+		  
+        case current_state is
+				
+				-- Apagado
+            when S0 =>
+                leds_temp <= "0000";
+					 runClock <= '0';
+					 
+					 -- Encender reloj
+                if btn5 = '1' then
+                    next_state <= S1;
+                else
+                    next_state <= S0;
+                end if;
+					 
+				-- Modo reloj
+            when S1 =>
+                leds_temp <= "1000";
+					 
+					 runClock <= '1';
+
+					 -- Apagar
+                if btn2 = '1' then
+                    next_state <= S4;
+					 
+					 -- Cronometro
+                elsif btn3 = '1' then
+                    next_state <= S3;
+						  
+					 -- Modificar hora
+                elsif btn4 = '1' then
+                    next_state <= S2;
+                else
+                    next_state <= S1;
+                end if;
+					 
+ 
+				-- Modo modificar hora
+            when S2 =>
+                leds_temp <= "0100";
+					 runClock <= '0';
+					 -- Guardar cambios y regresar a reloj
+                if btn5 = '1' then
+                    next_state <= S1;
+                else
+                    next_state <= S2;
+                end if;
+
+				-- Cronometro
+            when S3 =>
+                leds_temp <= "0010";
+
+					 runClock <= '0';
+					 -- Apagar 
+                if btn2 = '1' then
+                    next_state <= S4;
+						  
+					 -- Regresar a reloj
+                elsif btn5 = '1' then
+                    next_state <= S1;
+					
+                else
+                    next_state <= S3;
+                end if;
+
+				-- Despedida
+            when S4 =>
+                leds_temp <= "0001";
+					 runClock <= '0';
+					 -- Apagado
+                if btn4 = '1' then
+                    next_state <= S0;
+                else
+                    next_state <= S4;
+                end if;
+					 
+				when others => next_state <= S0;
+        end case;
+    end process transitions;
+	 
+--	 clockEnable : process (clock_enable, reset)
+--	 begin
+--		if reset = '1' then
+--			sec <= 0;
+--			min <= 0;
+--			hour <= 0;
+--		elsif clock_enable = '1' and runClock = '1' then
+--			if sec < 59 then
+--			sec <= sec + 1;
+--			end if;
+--		end if;
+--	 end process clockEnable;
+
+	 d1 <= int_to_7seg(sec mod 10);
+	 d2 <= int_to_7seg(sec / 10);
+	 d3 <= int_to_7seg(min mod 10);
+	 --d4 <= int_to_7seg(min / 10);
+	 
+	 
+	 
+	 leds <= leds_temp;
+	 
+
+end Behavioral;
+
